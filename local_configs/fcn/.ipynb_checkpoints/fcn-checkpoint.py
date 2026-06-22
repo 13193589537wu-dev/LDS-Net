@@ -1,0 +1,108 @@
+_base_ = [
+    # '../_base_/models/fcn_r50-d8.py',        # FCN 基础模型
+    '../_base_/datasets/sw.py',   # 替换为你的数据集
+    '../_base_/default_runtime.py',
+    '../_base_/schedules/schedule_160k_adamw.py'
+]
+
+# norm
+norm_cfg = dict(type='BN', requires_grad=True)
+img_norm_cfg = dict(
+    mean=[123.675, 116.28, 103.53],
+    std=[58.395, 57.12, 57.375],
+    to_rgb=True
+)
+
+model = dict(
+    type='EncoderDecoder',
+    pretrained=None,  #  'open-mmlab://resnet50_v1c',   # 可换成 None
+    backbone=dict(
+        type='ResNet',
+        depth=50,
+        num_stages=4,
+        out_indices=(0, 1, 2, 3),
+        dilations=(1, 1, 2, 4),
+        strides=(1, 2, 1, 1),
+        norm_cfg=norm_cfg,
+        norm_eval=False,
+        style='pytorch'
+    ),
+    decode_head=dict(
+        type='FCNHead',
+        in_channels=2048,     # ResNet 最后输出通道
+        in_index=3,
+        channels=512,
+        num_convs=2,
+        concat_input=True,
+        dropout_ratio=0.1,
+        num_classes=2,        # 类别数
+        norm_cfg=norm_cfg,
+        align_corners=False,
+        loss_decode=dict(
+            type='MultiLoss',     # 你老版本的写法
+            losses=[
+                dict(
+                    type='CrossEntropyLoss',
+                    loss_weight=1.0
+                )
+                # ),
+                # dict(
+                #     type='DiceLoss',
+                #     loss_weight=3.0,
+                #     ignore_index=255
+                # )
+            ]
+        )
+    ),
+    auxiliary_head=dict(      # FCN 通常有一个辅助头
+        type='FCNHead',
+        in_channels=1024,
+        in_index=2,
+        channels=256,
+        num_convs=1,
+        concat_input=False,
+        dropout_ratio=0.1,
+        num_classes=2,
+        norm_cfg=norm_cfg,
+        align_corners=False,
+        loss_decode=dict(
+            type='CrossEntropyLoss'
+            # , loss_weight=0.4
+        )
+    ),
+    train_cfg=dict(),
+    test_cfg=dict(mode='whole')
+)
+
+# optimizer
+optimizer = dict(
+    type='AdamW', lr=0.0001, betas=(0.9, 0.999), weight_decay=0.01,
+    paramwise_cfg=dict(
+        custom_keys={'pos_block': dict(decay_mult=0.),
+                     'norm': dict(decay_mult=0.),
+                     'head': dict(lr_mult=10.0)}
+    )
+)
+
+# 学习率策略
+lr_config = dict(
+    policy='poly',
+    warmup='linear',
+    warmup_iters=5000,
+    warmup_ratio=1e-6,
+    power=1.0, min_lr=0.0, by_epoch=False
+)
+
+# 评估指标
+evaluation = dict(
+    interval=3000,
+    metric=['mIoU', 'mDice', 'mRecall', 'mPrecision', 'aAcc', 'mFscore']
+)
+test_evaluator = dict(
+    type='IoUMetric',
+    metrics=['mIoU', 'mDice', 'mPrecision', 'mRecall', 'aAcc', 'mFscore']
+)
+
+# 模型存储
+work_dir = './work_dirs/qtpl/fcn'
+checkpoint_config = dict(interval=3000, max_keep_ckpts=4)
